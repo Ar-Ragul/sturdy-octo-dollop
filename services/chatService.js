@@ -1,25 +1,28 @@
 const { OpenAI } = require("openai");
-const chromadb = require("chromadb");
+require("dotenv").config();
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-const chroma = new chromadb.ChromaDB();
 
+/**
+ * Handles AI chat requests.
+ */
 async function chatWithAI(prompt) {
-    // Retrieve chat history
-    const history = await chroma.query("chat_memory");
+    try {
+        console.log(`📩 Received prompt: ${prompt}`);
 
-    // Send full conversation to OpenAI for context
-    const response = await openai.chat.completions.create({
-        model: "gpt-4",
-        messages: [...history, { role: "user", content: prompt }],
-    });
+        const response = await openai.chat.completions.create({
+            model: "gpt-4o-mini",
+            messages: [{ role: "user", content: prompt }],
+        });
 
-    const message = response.choices[0].message.content;
+        const aiResponse = response.choices[0].message.content;
+        console.log(`🤖 AI Response: ${aiResponse}`);
 
-    // Store AI response in memory
-    await chroma.store("chat_memory", { role: "assistant", content: message });
-
-    return message;
+        return aiResponse;
+    } catch (error) {
+        console.error("❌ Chat Service Error:", error);
+        return "⚠️ Error processing your request.";
+    }
 }
 
 module.exports = { chatWithAI };
