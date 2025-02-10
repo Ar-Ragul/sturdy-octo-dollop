@@ -1,7 +1,8 @@
 import dotenv from "dotenv";
 import express from "express";
 import cors from "cors";
-import {executeAIWorkflow, storeArchitectTask, getLatestArchitectTask, executeAgentQuery} from "./services/agentService.js";
+import {runCompanyWorkflow, storeArchitectTask, getLatestArchitectTask} from "./services/agentService.js";
+import {chatWithAI} from "./services/chatService.js";
 
 
 dotenv.config();
@@ -21,9 +22,9 @@ app.post("/architect-task", async (req, res) => {
         const { task } = req.body;
         if (!task) return res.status(400).json({ error: "Task is required" });
 
-        storeArchitectTask(task); // Save the task
-        const aiNodesOutput = await executeAIWorkflow(task); // AI starts working on it
-        res.json({ message: "Task started successfully", aiNodesOutput });
+        storeArchitectTask(task); // ✅ Save the task
+        const projectOutput = await runCompanyWorkflow(task); // ✅ AI Company starts working
+        res.json({ message: "Company AI workflow started", projectOutput });
     } catch (error) {
         console.error("❌ Error processing task:", error);
         res.status(500).json({ error: error.message });
@@ -41,18 +42,18 @@ app.get("/architect-task", async (req, res) => {
     }
 });
 
-app.post("/developer-update", async (req, res) => {
-    try {
-        const { update } = req.body;
-        if (!update) return res.status(400).json({ error: "Update is required" });
+// app.post("/developer-update", async (req, res) => {
+//     try {
+//         const { update } = req.body;
+//         if (!update) return res.status(400).json({ error: "Update is required" });
 
-        const response = await agentService.executeAgentQuery(update, "Developer");
-        res.json({ response });
-    } catch (error) {
-        console.error("❌ Developer Update Error:", error);
-        res.status(500).json({ error: error.message });
-    }
-});
+//         const response = await executeAgentQuery(update, "Developer");
+//         res.json({ response });
+//     } catch (error) {
+//         console.error("❌ Developer Update Error:", error);
+//         res.status(500).json({ error: error.message });
+//     }
+// });
 
 app.post("/chat", async (req, res) => {
     try {
@@ -66,18 +67,18 @@ app.post("/chat", async (req, res) => {
     }
 });
 
-app.post("/agent", async (req, res) => {
-    try {
-        const { query, role } = req.body;
-        if (!query || !role) {
-            return res.status(400).json({ error: "Query and role are required" });
-        }
+// app.post("/agent", async (req, res) => {
+//     try {
+//         const { query, role } = req.body;
+//         if (!query || !role) {
+//             return res.status(400).json({ error: "Query and role are required" });
+//         }
 
-        const response = await executeAgentQuery(query, role);
-        res.json({ response });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
+//         const response = await executeAgentQuery(query, role);
+//         res.json({ response });
+//     } catch (error) {
+//         res.status(500).json({ error: error.message });
+//     }
+// });
 
 app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
