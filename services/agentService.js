@@ -1,13 +1,73 @@
-const { OpenAI } = require("openai");
-const axios = require("axios");
-require("dotenv").config();
+import OpenAI from "openai";
+import dotenv from "dotenv";
+import axios from "axios";
+
+dotenv.config();
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
+let architectTask = ""; 
+
+async function storeArchitectTask(task) {
+    console.log(`📝 Architect assigned task: ${task}`);
+    architectTask = task;
+}
+
 /**
- * Executes AI agent queries.
- * The AI can fetch live data or perform actions based on query.
+ * ✅ Fetches the latest Architect's task.
  */
+async function getLatestArchitectTask() {
+    return architectTask || "No task has been assigned yet.";
+}
+
+/**
+ * ✅ Main AI-driven workflow execution:
+ * 1️⃣ Breaks down project into subtasks
+ * 2️⃣ Assigns subtasks to AI Nodes
+ * 3️⃣ Integrates responses to complete the project
+ */
+async function executeAIWorkflow(projectTask) {
+    console.log(`🤖 AI Nodes received project: ${projectTask}`);
+
+    // Step 1️⃣: AI breaks down project into subtasks
+    const breakdownResponse = await openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: [{ role: "user", content: `Break this project into smaller tasks: ${projectTask}` }],
+    });
+
+    const subtasks = breakdownResponse.choices[0].message.content.split("\n").filter(task => task.trim());
+
+    console.log(`📌 AI-generated subtasks:`, subtasks);
+
+    let aiNodesOutput = [];
+
+    // Step 2️⃣: Each AI Node completes a subtask
+    for (const subtask of subtasks) {
+        console.log(`🤖 AI Node working on: ${subtask}`);
+
+        const nodeResponse = await openai.chat.completions.create({
+            model: "gpt-4o-mini",
+            messages: [{ role: "user", content: `Complete this task in detail: ${subtask}` }],
+        });
+
+        const aiOutput = nodeResponse.choices[0].message.content;
+        aiNodesOutput.push({ subtask, aiOutput });
+    }
+
+    // Step 3️⃣: AI integrates all responses into a final project summary
+    const integrationResponse = await openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: [
+            { role: "user", content: `Here are the completed subtasks:\n${JSON.stringify(aiNodesOutput)}\n\nIntegrate these into a final project summary.` },
+        ],
+    });
+
+    const finalProject = integrationResponse.choices[0].message.content;
+    console.log(`✅ AI Integrated Final Project:\n`, finalProject);
+
+    return { subtasks, aiNodesOutput, finalProject };
+}
+
 async function executeAgentQuery(query) {
     try {
         console.log(`🤖 AI Agent received query: ${query}`);
@@ -43,6 +103,9 @@ async function handleAPIActions(query) {
     }
     if (query.toLowerCase().includes("restaurant")) {
         return await getRestaurants(query);
+    }
+    if (query.toLowerCase().includes("task")) {
+        return await storeArchitectTask(query);
     }
     return null; // No predefined API action found
 }
@@ -127,4 +190,5 @@ function extractStockSymbol(query) {
     return match ? match[0] : null;
 }
 
-module.exports = { executeAgentQuery };
+export { executeAgentQuery, storeArchitectTask, getLatestArchitectTask, executeAIWorkflow };
+

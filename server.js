@@ -1,8 +1,10 @@
-require("dotenv").config();
-const express = require("express");
-const cors = require("cors");
-const { chatWithAI } = require("./services/chatService");
-const { executeAgentQuery } = require("./services/agentService");
+import dotenv from "dotenv";
+import express from "express";
+import cors from "cors";
+import {executeAIWorkflow, storeArchitectTask, getLatestArchitectTask, executeAgentQuery} from "./services/agentService.js";
+
+
+dotenv.config();
 
 const app = express();
 app.use(express.json());
@@ -19,18 +21,19 @@ app.post("/architect-task", async (req, res) => {
         const { task } = req.body;
         if (!task) return res.status(400).json({ error: "Task is required" });
 
-        await storeArchitectTask(task);
-        res.json({ message: "Task saved successfully" });
+        storeArchitectTask(task); // Save the task
+        const aiNodesOutput = await executeAIWorkflow(task); // AI starts working on it
+        res.json({ message: "Task started successfully", aiNodesOutput });
     } catch (error) {
-        console.error("❌ Error saving task:", error);
+        console.error("❌ Error processing task:", error);
         res.status(500).json({ error: error.message });
     }
 });
 
-// ✅ Developers fetch latest Architect task
+// ✅ Get latest Architect's Task
 app.get("/architect-task", async (req, res) => {
     try {
-        const task = await getLatestArchitectTask();
+        const task = getLatestArchitectTask();
         res.json({ task });
     } catch (error) {
         console.error("❌ Error fetching task:", error);
@@ -38,20 +41,18 @@ app.get("/architect-task", async (req, res) => {
     }
 });
 
-// ✅ Developers submit progress updates
 app.post("/developer-update", async (req, res) => {
     try {
         const { update } = req.body;
         if (!update) return res.status(400).json({ error: "Update is required" });
 
-        const response = await executeAgentQuery(update, "Developer");
+        const response = await agentService.executeAgentQuery(update, "Developer");
         res.json({ response });
     } catch (error) {
         console.error("❌ Developer Update Error:", error);
         res.status(500).json({ error: error.message });
     }
 });
-
 
 app.post("/chat", async (req, res) => {
     try {
