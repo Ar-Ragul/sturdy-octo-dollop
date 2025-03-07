@@ -1,109 +1,75 @@
-import dotenv from "dotenv";
 import express from "express";
 import cors from "cors";
-// import {storeArchitectTask, getLatestArchitectTask} from "./services/agentService.js";
-import { createAssistant, executeAITask, createAI_Agent, listAgents } from './services/agentService.js'; 
-import {chatWithAI} from "./services/chatService.js";
-
-
-dotenv.config();
+import { Readable } from "stream";
+import { listAgents, createAI_Agent, roundTableDecision, assignTaskToAgent} from "./services/agentService.js";
 
 const app = express();
-app.use(express.json());
+const PORT = 3000;
+
 app.use(cors());
-
-const PORT = process.env.PORT || 3000;
-let assistantId = null;
-
-
-console.log("🔑 OpenAI API Key:", process.env.OPENAI_API_KEY);
+app.use(express.json());
 
 
 
-
+/**
+ * ✅ Fetch Existing AI Agents (Predefined & Created)
+ */
 app.get("/agents", async (req, res) => {
     try {
         const agents = await listAgents();
         res.json({ agents });
     } catch (error) {
         console.error("❌ Error fetching agents:", error);
-        res.status(500).json({ error: "Failed to fetch agents." });
+        res.status(500).json({ error: "Failed to retrieve agents" });
     }
 });
 
-// ✅ Route to create an agent (optional)
-app.post("/agents", async (req, res) => {
+/**
+ * ✅ AI Architect Creates a New AI Agent
+ */
+app.post("/create-agent", async (req, res) => {
     try {
-        const { role } = req.body;
-        if (!role) {
-            return res.status(400).json({ error: "Role is required." });
+        const { role, architectId } = req.body;
+        if (!role || !architectId) {
+            return res.status(400).json({ error: "Role and Architect ID are required." });
         }
-        const agent = await createAI_Agent(role);
-        res.json({ message: "Agent created", agentId: agent.id });
+
+        const agent = await createAI_Agent(role, architectId);
+        res.json({ message: "Agent Created", agent });
     } catch (error) {
-        console.error("❌ Error creating agent:", error);
-        res.status(500).json({ error: "Failed to create agent." });
+        console.error("❌ Error creating AI agent:", error);
+        res.status(500).json({ error: "Agent creation failed." });
     }
 });
 
-app.post("/chat", async (req, res) => {
-    try {
-        const { prompt } = req.body;
-        if (!prompt) return res.status(400).json({ error: "Prompt is required" });
-
-        const response = await chatWithAI(prompt);
-        res.json({ response });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
-
-
-(async () => {
-    try {
-        assistantId = await createAssistant();
-        console.log(`✅ AI Assistant Initialized with ID: ${assistantId}`);
-    } catch (error) {
-        console.error("❌ Error initializing AI Assistant:", error);
-    }
-})();
-
-// ✅ Route to Send Tasks to AI Dev Squad
-app.post("/ai-task", async (req, res) => {
+/**
+ * ✅ AI Multi-Agent Roundtable Discussion
+ */
+app.post("/roundtable", async (req, res) => {
     try {
         const { task } = req.body;
-        if (!task) return res.status(400).json({ error: "Task is required" });
+        if (!task) {
+            return res.status(400).json({ error: "Task is required." });
+        }
 
-        if (!assistantId) return res.status(500).json({ error: "AI Assistant not initialized" });
-
-        const aiResponse = await executeAITask(assistantId, task);
-        res.json({ message: "AI Task Processed", aiResponse });
+        const responses = await roundTableDecision(task);
+        res.json({ message: "AI Roundtable Completed", responses });
     } catch (error) {
-        console.error("❌ Error:", error);
-        res.status(500).json({ error: error.message });
+        console.error("❌ Error in AI roundtable discussion:", error);
+        res.status(500).json({ error: "AI Roundtable Discussion Failed." });
     }
 });
 
+/**
+ * ✅ Assign a Task to an AI Agent (POST Request)
+ */
+app.post("/assign-task", assignTaskToAgent);
 
-app.post("/execute-task", async (req, res) => {
-    const { task } = req.body;
-    try {
-        const response = await roundTableDecision(task);
-        res.json({ message: "Task executed successfully", response });
-    } catch (error) {
-        res.status(500).json({ error: "Failed to execute task" });
-    }
+
+
+
+
+
+app.listen(PORT, () => {
+    console.log(`✅ Server running on port ${PORT}`);
 });
-
-
-app.post("/create-agent", async (req, res) => {
-    const { role } = req.body;
-    try {
-        const agent_id = await createAI_Agent(role);
-        res.json({ message: "Agent created", agent_id });
-    } catch (error) {
-        res.status(500).json({ error: "Failed to create agent" });
-    }
-});
-
-app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));

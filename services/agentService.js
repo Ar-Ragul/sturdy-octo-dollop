@@ -1,29 +1,27 @@
 import OpenAI from "openai";
 import dotenv from "dotenv";
+import util from "util";
+import { Readable } from "stream";
 
 dotenv.config();
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-let ASSISTANT_ID = null;
-const agents = []; // Local agent storage
+// ✅ Default AI Agents (Manually Created)
+const defaultAgents = [
+    { id: "asst_sales_manager", name: "Sales Manager", role: "Sales" },
+    { id: "asst_bank_manager", name: "Bank Manager", role: "Finance" },
+    { id: "asst_ai_project_manager", name: "AI Project Manager", role: "AI Management" },
+    { id: "asst_software_architect", name: "Software Architect", role: "Software Design" },
+    { id: "asst_personal_trainer", name: "Personal Trainer", role: "Health & Fitness" }
+];
 
 /**
- * ✅ Register a Local Agent (Used in UI)
- */
-const registerLocalAgent = (role) => {
-    const agentId = `agent-${Date.now()}`;
-    const newAgent = { id: agentId, role };
-    agents.push(newAgent);
-    return newAgent;
-};
-
-/**
- * ✅ List all Local Agents
+ * ✅ Fetch AI Agents (Predefined + Dynamically Created)
  */
 export async function listAgents() {
     try {
-        const assistants = await openai.beta.assistants.list(); // ✅ Fetch from OpenAI
+        const assistants = await openai.beta.assistants.list(); // Fetch from OpenAI
         return assistants.data.map(assistant => ({
             id: assistant.id,
             name: assistant.name,
@@ -36,65 +34,48 @@ export async function listAgents() {
 }
 
 /**
- * ✅ Create a Persistent AI Assistant (Avoid Duplicates)
+ * ✅ AI Architect Creates New AI Assistants (e.g., Developers, QA)
  */
-export async function createAssistant() {
-    if (ASSISTANT_ID) return ASSISTANT_ID; // Reuse existing assistant
-
+export async function createAI_Agent(role, architectId) {
     try {
-        const assistant = await openai.beta.assistants.create({
-            name: "AI Project Manager",
-            instructions: "You are an Scrum Master that facilitates collaborative decision-making.",
-            tools: [{ type: "code_interpreter" }],
-            model: "gpt-4o-mini",
-        });
+        // Check if this role already exists
+        const existingAgent = defaultAgents.find(agent => agent.role === role);
+        if (existingAgent) {
+            return { agentId: existingAgent.id, name: existingAgent.name };
+        }
 
-        ASSISTANT_ID = assistant.id;
-        console.log(`✅ Assistant Created: ${ASSISTANT_ID}`);
-        return ASSISTANT_ID;
-    } catch (error) {
-        console.error("❌ Error creating assistant:", error);
-        throw new Error("Failed to create AI Assistant.");
-    }
-}
-
-/**
- * ✅ Create a Specialized AI Agent (Persistent)
- */
-export async function createAI_Agent(role) {
-    try {
+        // If not, create a new AI assistant
         const assistant = await openai.beta.assistants.create({
             name: role,
-            instructions: `You are an AI ${role} responsible for decision-making.`,
+            instructions: `You are an AI ${role} created by ${architectId} to assist in project development.`,
             tools: [{ type: "code_interpreter" }],
             model: "gpt-4o-mini",
         });
 
         console.log(`✅ ${role} AI Agent Created: ${assistant.id}`);
-        return { agentId: assistant.id };
+        return { agentId: assistant.id, name: assistant.name };
     } catch (error) {
         console.error("❌ Failed to create AI agent:", error);
-        throw new Error("Failed to create AI agent.");
+        return { error: "Agent creation failed." };
     }
 }
 
 /**
- * ✅ AI Round Table Decision-Making
+ * ✅ AI Agents Collaborate on a Task (Roundtable Discussion)
  */
 export async function roundTableDecision(task) {
     try {
-        // Define key roles (architect, developers, QA, etc.)
-        const roles = ["Software Architect", "Developer", "QA"];
+        const agentRoles = ["Software Architect", "Developer", "QA"];
         
         const agentIds = [];
-        for (const role of roles) {
-            const agent = await createAI_Agent(role);
+        for (const role of agentRoles) {
+            const agent = await createAI_Agent(role, "Master Architect");
             agentIds.push(agent.agentId);
         }
 
         const agentResponses = [];
 
-        // Create a shared thread for the discussion
+        // Create a shared thread for discussion
         const thread = await openai.beta.threads.create();
 
         for (const agentId of agentIds) {
@@ -114,7 +95,7 @@ export async function roundTableDecision(task) {
                     response = await openai.beta.threads.messages.list(thread.id);
                     break;
                 }
-                await new Promise((resolve) => setTimeout(resolve, 2000)); // Retry delay
+                await new Promise(resolve => setTimeout(resolve, 2000)); // Wait & retry
             }
 
             agentResponses.push(response.data[0].content);
@@ -127,42 +108,85 @@ export async function roundTableDecision(task) {
     }
 }
 
-/**
- * ✅ Execute an AI Task (Single AI Assistant)
- */
-export async function executeAITask(userMessage) {
+export async function executeAITask(agentId, task, res) {
     try {
-        const assistantId = await createAssistant(); // Ensure assistant exists
+        console.log("📨 Sending Task to AI Agent:", agentId, task);
 
-        // Create new discussion thread
         const thread = await openai.beta.threads.create();
-        await openai.beta.threads.messages.create(thread.id, {
-            role: "user",
-            content: userMessage,
-        });
-
-        // Start AI processing
-        const run = await openai.beta.threads.runs.create(thread.id, {
-            assistant_id: assistantId,
-        });
+        await openai.beta.threads.messages.create(thread.id, { role: "user", content: task });
+        const run = await openai.beta.threads.runs.create(thread.id, { assistant_id: agentId });
 
         console.log("⏳ AI is processing...");
 
-        let response;
-        while (true) {
+        res.setHeader("Content-Type", "text/event-stream");
+        res.setHeader("Cache-Control", "no-cache");
+        res.setHeader("Connection", "keep-alive");
+
+        let completed = false;
+        while (!completed) {
             const runStatus = await openai.beta.threads.runs.retrieve(thread.id, run.id);
+
             if (runStatus.status === "completed") {
-                response = await openai.beta.threads.messages.list(thread.id);
-                break;
+                const response = await openai.beta.threads.messages.list(thread.id);
+
+                for (const msg of response.data) {
+                    res.write(`data: ${JSON.stringify(msg.content.map(c => c.text.value).join("\n"))}\n\n`);
+                }
+                completed = true;
             }
-            await new Promise((resolve) => setTimeout(resolve, 2000)); // Retry delay
+            await new Promise((resolve) => setTimeout(resolve, 2000));
         }
 
-        return response.data[0].content;
+        res.end();
     } catch (error) {
-        console.error("❌ Assistance API Error:", error);
-        return "⚠️ AI Assistant failed to process.";
+        console.error("❌ AI Streaming Error:", error);
+        res.write(`data: Error: AI Assistant failed to process.\n\n`);
+        res.end();
     }
 }
 
-export { registerLocalAgent };
+
+export async function assignTaskToAgent(agentId, task, res) {
+    try {
+        console.log(`📨 Assigning Task to AI Agent: ${agentId}`);
+
+        // Create a new AI thread for this task
+        const thread = await openai.beta.threads.create();
+        await openai.beta.threads.messages.create(thread.id, { role: "user", content: task });
+
+        // Start AI processing
+        const run = await openai.beta.threads.runs.create(thread.id, { assistant_id: agentId });
+        console.log(`✅ AI Task Started:`, run);
+
+        res.setHeader("Content-Type", "text/event-stream");
+        res.setHeader("Cache-Control", "no-cache");
+        res.setHeader("Connection", "keep-alive");
+
+        // Poll AI response
+        let completed = false;
+        while (!completed) {
+            const runStatus = await openai.beta.threads.runs.retrieve(thread.id, run.id);
+
+            if (runStatus.status === "completed") {
+                const response = await openai.beta.threads.messages.list(thread.id);
+                for (const message of response.data) {
+                    if (message?.content?.[0]?.text?.value) {
+                        res.write(`data: ${JSON.stringify({ text: message.content[0].text.value })}\n\n`);
+                    }
+                }
+                completed = true;
+            }
+
+            await new Promise((resolve) => setTimeout(resolve, 2000)); // Wait & retry
+        }
+
+        console.log(`✅ AI Task Completed`);
+        res.end();
+    } catch (error) {
+        console.error("❌ AI Task Error:", error);
+        res.write(`data: ${JSON.stringify({ error: "AI Task Execution Failed" })}\n\n`);
+        res.end();
+    }
+}
+
+
