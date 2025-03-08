@@ -63,11 +63,21 @@ app.post("/roundtable", async (req, res) => {
 /**
  * ✅ Assign a Task to an AI Agent (POST Request)
  */
-app.post("/assign-task", assignTaskToAgent);
+app.post("/assign-task", async (req, res) => {
+    try {
+        const { agentId, task, role } = req.body;
+        if (!agentId || !task || !role) {
+            return res.status(400).json({ error: "Missing agentId, task, or role." });
+        }
 
+        const response = await assignTaskToAgent(agentId, task, role);
+        res.json({ response });
 
-
-
+    } catch (error) {
+        console.error("❌ Task Pipeline Error:", error);
+        res.status(500).json({ error: "AI Task Execution Failed." });
+    }
+});
 
 
 app.listen(PORT, () => {
