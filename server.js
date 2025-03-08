@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import { Readable } from "stream";
 import { listAgents, createAI_Agent, roundTableDecision, assignTaskToAgent} from "./services/agentService.js";
+import { chatWithAI } from "./services/chatService.js";
 
 const app = express();
 const PORT = 3000;
@@ -58,6 +59,13 @@ app.post("/roundtable", async (req, res) => {
         console.error("❌ Error in AI roundtable discussion:", error);
         res.status(500).json({ error: "AI Roundtable Discussion Failed." });
     }
+});
+
+app.post("/chat", async (req, res) => {
+    chatWithAI(req.body.prompt).then((response) => {
+        res.json({ response });
+    }
+    );
 });
 
 /**
