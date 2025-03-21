@@ -1,14 +1,21 @@
 import express from "express";
 import cors from "cors";
-import { Readable } from "stream";
+import { createServer } from "http";
+import { WebSocketServer } from "ws";
 import { listAgents, createAI_Agent, roundTableDecision, assignTaskToAgent} from "./services/agentService.js";
 import { chatWithAI } from "./services/chatService.js";
 
 const app = express();
 const PORT = 3000;
+// const WebSocket = require("ws");
 
 app.use(cors());
 app.use(express.json());
+
+// WebSocket server
+const server = createServer(app);
+
+const wss = new WebSocketServer({ server });
 
 
 
@@ -78,16 +85,37 @@ app.post("/assign-task", async (req, res) => {
             return res.status(400).json({ error: "Missing agentId, task, or role." });
         }
 
-        const response = await assignTaskToAgent(agentId, task, role);
-        res.json({ response });
+        // Broadcast function to send updates to all WebSocket clients
+        const broadcast = (data) => {
+            console.log("Broadcasting:", data); // Add this line
+            wss.clients.forEach((client) => {
+                if (client.readyState === WebSocket.OPEN) {
+                    client.send(JSON.stringify(data));
+                }
+            });
+        };
 
+        // Assign the task
+        const response = await assignTaskToAgent(agentId, task, role, broadcast);
+
+        res.json({ response });
     } catch (error) {
         console.error("❌ Task Pipeline Error:", error);
         res.status(500).json({ error: "AI Task Execution Failed." });
     }
 });
+  
 
 
-app.listen(PORT, () => {
-    console.log(`✅ Server running on port ${PORT}`);
+wss.on("connection", (ws) => {
+    console.log("Client connected");
+
+    ws.on("close", () => {
+        console.log("Client disconnected");
+    });
+});
+
+// Start the HTTP server
+server.listen(PORT, () => {
+    console.log(`HTTP and WebSocket servers are running on http://localhost:${PORT}`);
 });

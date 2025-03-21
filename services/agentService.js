@@ -1,7 +1,5 @@
 import OpenAI from "openai";
 import dotenv from "dotenv";
-import util from "util";
-import { Readable } from "stream";
 
 dotenv.config();
 
@@ -163,95 +161,236 @@ export async function executeAITask(agentId, task, res) {
     }
 }
 
-
-export async function assignTaskToAgent(agentId, task, role) {
+export async function assignTaskToAgent(agentId, task, role, broadcast) {
     try {
         console.log(`📨 Assigning Task to AI Agent (${role}): ${agentId}`);
 
+        // Notify clients that the task is being assigned
+        broadcast({ type: "TASK_ASSIGNING", data: { agentId, task, role } });
+
+        // Create a new thread if it doesn't exist
         if (!aiThreads[agentId]) {
             console.log(`⚠️ Creating a new thread for ${role}`);
             aiThreads[agentId] = await openai.beta.threads.create();
         }
 
         const threadId = aiThreads[agentId].id;
+
+        // Add the task to the thread
         await openai.beta.threads.messages.create(threadId, { role: "user", content: task });
 
+        // Start the task
         const run = await openai.beta.threads.runs.create(threadId, { assistant_id: agentId });
 
         console.log(`✅ AI Task Started for ${role}:`, run);
 
+        // Notify clients that the task has started
+        broadcast({ type: "TASK_STARTED", data: { agentId, task, role, runId: run.id } });
+
         let retries = 0;
         let responseText = "";
 
+        // Poll for task completion
         while (retries < 10) {
             const runStatus = await openai.beta.threads.runs.retrieve(threadId, run.id);
-        
-            console.log(`⏳ Checking status for ${role}:`, runStatus.status);
-        
-            if (runStatus.status === "completed") {
-                const response = await openai.beta.threads.messages.list(threadId);
-                responseText = response.data.map(msg => msg.content.map(c => c.text.value).join("\n")).join("\n\n");
-                console.log(`✅ ${role} AI Completed Task:`, responseText);
-                break;
-            } 
-            
-            else if (runStatus.status === "queued") {
-                console.log(`🚨 ${role} task is still queued. Retrying...`);
-            } 
-            
-            else if (runStatus.status === "in_progress") {
-                console.log(`⏳ ${role} is processing the task...`);
-            } 
-            
-            else if (runStatus.status === "requires_action") {
-                console.log(`🔄 ${role} requires additional action. Attempting to auto-resolve...`);
-            
-                if (runStatus.required_action?.type === "submit_tool_outputs") {
-                    console.log(`🛠️ AI is waiting for tool execution. Submitting fake tool outputs...`);
-            
-                    // Extract tool calls from OpenAI response
-                    const toolCalls = runStatus.required_action.submit_tool_outputs.tool_calls;
-            
-                    // Simulate a tool output
-                    const toolOutputs = toolCalls.map((tool) => ({
-                        tool_call_id: tool.id,
-                        output: "✅ Tool execution completed successfully."
-                    }));
-            
-                    // Submit the tool outputs back to OpenAI
-                    await openai.beta.threads.runs.submitToolOutputs(threadId, run.id, { tool_outputs: toolOutputs });
-            
-                    console.log(`✅ Submitted tool execution results to OpenAI.`);
-                } else {
-                    console.log(`⚠️ Unhandled \`requires_action\` type:`, runStatus.required_action);
-                    break; // Stop retrying if we don't know what action to take
-                }
-            }
-            
-            
-            else if (runStatus.status === "failed") {
-                console.error(`❌ ${role} AI Task Failed.`);
-                return { error: `AI Task Execution Failed for ${role}` };
-            }
-        
-            retries++;
-            await new Promise((resolve) => setTimeout(resolve, 5000)); // ✅ Wait & retry
-        }
-        
 
+            console.log(`⏳ Checking status for ${role}:`, runStatus.status);
+
+            // Handle different run statuses
+            switch (runStatus.status) {
+                case "completed":
+                    const response = await openai.beta.threads.messages.list(threadId);
+                    responseText = response.data
+                        .map((msg) => msg.content.map((c) => c.text.value).join("\n"))
+                        .join("\n\n");
+
+                    console.log(`✅ ${role} AI Completed Task:`, responseText);
+
+                    // Notify clients that the task is completed
+                    broadcast({ type: "TASK_COMPLETED", data: { agentId, task, role, response: responseText } });
+
+                    return responseText;
+
+                case "queued":
+                    console.log(`🚨 ${role} task is still queued. Retrying...`);
+                    break;
+
+                case "in_progress":
+                    console.log(`⏳ ${role} is processing the task...`);
+                    break;
+
+                case "requires_action":
+                    console.log(`🔄 ${role} requires additional action. Attempting to auto-resolve...`);
+
+                    if (runStatus.required_action?.type === "submit_tool_outputs") {
+                        console.log(`🛠️ AI is waiting for tool execution. Submitting fake tool outputs...`);
+
+                        // Extract tool calls from OpenAI response
+                        const toolCalls = runStatus.required_action.submit_tool_outputs.tool_calls;
+
+                        // Simulate a tool output
+                        const toolOutputs = toolCalls.map((tool) => ({
+                            tool_call_id: tool.id,
+                            output: "✅ Tool execution completed successfully.",
+                        }));
+
+                        // Submit the tool outputs back to OpenAI
+                        await openai.beta.threads.runs.submitToolOutputs(threadId, run.id, { tool_outputs: toolOutputs });
+
+                        console.log(`✅ Submitted tool execution results to OpenAI.`);
+                    } else {
+                        console.log(`⚠️ Unhandled \`requires_action\` type:`, runStatus.required_action);
+                        break; // Stop retrying if we don't know what action to take
+                    }
+                    break;
+
+                case "failed":
+                    console.error(`❌ ${role} AI Task Failed.`);
+
+                    // Notify clients that the task failed
+                    broadcast({ type: "TASK_FAILED", data: { agentId, task, role, error: `AI Task Execution Failed for ${role}` } });
+
+                    return { error: `AI Task Execution Failed for ${role}` };
+
+                default:
+                    console.log(`⚠️ Unknown status: ${runStatus.status}`);
+                    break;
+            }
+
+            retries++;
+            await new Promise((resolve) => setTimeout(resolve, 5000)); // Wait & retry
+        }
+
+        // Handle timeout
         if (!responseText) {
             console.error(`❌ ${role} AI did not return a response.`);
+
+            // Notify clients that the task timed out
+            broadcast({ type: "TASK_TIMEOUT", data: { agentId, task, role, error: `${role} AI did not complete.` } });
+
             return { error: `${role} AI did not complete.` };
         }
-
-        return responseText;
-
     } catch (error) {
         console.error(`❌ Task Assignment Error for ${role}:`, error);
+
+        // Notify clients about the error
+        broadcast({ type: "TASK_ERROR", data: { agentId, task, role, error: `AI Task Execution Failed for ${role}` } });
+
         return { error: `AI Task Execution Failed for ${role}` };
     }
 }
 
+
+// export async function assignTaskToAgent(agentId, task, role, broadcast) {
+//     try {
+//         console.log(`📨 Assigning Task to AI Agent (${role}): ${agentId}`);
+
+//         // Notify clients that the task is being assigned
+//         broadcast({ type: "TASK_ASSIGNING", data: { agentId, task, role } });
+
+//         // Create a new thread if it doesn't exist
+//         if (!aiThreads[agentId]) {
+//             console.log(`⚠️ Creating a new thread for ${role}`);
+//             aiThreads[agentId] = await openai.beta.threads.create();
+//         }
+
+//         const threadId = aiThreads[agentId].id;
+
+//         // Add the task to the thread
+//         await openai.beta.threads.messages.create(threadId, { role: "user", content: task });
+
+//         // Start the task with streaming
+//         const stream = await openai.beta.threads.runs.create(threadId, {
+//             assistant_id: agentId,
+//             stream: true, // Enable streaming
+//         });
+
+//         console.log(`✅ AI Task Started for ${role} with streaming`);
+
+//         // Notify clients that the task has started
+//         broadcast({ type: "TASK_STARTED", data: { agentId, task, role } });
+
+//         let responseText = "";
+
+//         // Listen for events from the stream
+//         for await (const event of stream) {
+//             console.log(`⏳ Stream Event for ${role}:`, event.event);
+
+//             // Handle different event types
+//             switch (event.event) {
+//                 case "thread.message.delta":
+//                     // Handle incremental message updates
+//                     const delta = event.data.delta;
+//                     if (delta.content && delta.content.length > 0) {
+//                         const newText = delta.content[0].text.value;
+//                         responseText += newText; // Append the new text to the response
+
+//                         // Broadcast the incremental update to the client
+//                         broadcast({ type: "TASK_UPDATE", data: { agentId, task, role, response: responseText } });
+//                     }
+//                     break;
+
+//                 case "thread.run.completed":
+//                     // Fetch the final response when the run is completed
+//                     const response = await openai.beta.threads.messages.list(threadId);
+//                     responseText = response.data
+//                         .map((msg) => msg.content.map((c) => c.text.value).join("\n"))
+//                         .join("\n\n");
+
+//                     console.log(`✅ ${role} AI Completed Task:`, responseText);
+
+//                     // Notify clients that the task is completed
+//                     broadcast({ type: "TASK_COMPLETED", data: { agentId, task, role, response: responseText } });
+
+//                     return responseText;
+
+//                 case "thread.run.requires_action":
+//                     console.log(`🔄 ${role} requires additional action. Attempting to auto-resolve...`);
+
+//                     if (event.data.required_action?.type === "submit_tool_outputs") {
+//                         console.log(`🛠️ AI is waiting for tool execution. Submitting fake tool outputs...`);
+
+//                         // Extract tool calls from OpenAI response
+//                         const toolCalls = event.data.required_action.submit_tool_outputs.tool_calls;
+
+//                         // Simulate a tool output
+//                         const toolOutputs = toolCalls.map((tool) => ({
+//                             tool_call_id: tool.id,
+//                             output: "✅ Tool execution completed successfully.",
+//                         }));
+
+//                         // Submit the tool outputs back to OpenAI
+//                         await openai.beta.threads.runs.submitToolOutputs(threadId, event.data.id, { tool_outputs: toolOutputs });
+
+//                         console.log(`✅ Submitted tool execution results to OpenAI.`);
+//                     } else {
+//                         console.log(`⚠️ Unhandled \`requires_action\` type:`, event.data.required_action);
+//                     }
+//                     break;
+
+//                 case "thread.run.failed":
+//                     console.error(`❌ ${role} AI Task Failed.`);
+//                     console.error("Failure Details:", event.data);
+
+//                     // Notify clients that the task failed
+//                     broadcast({ type: "TASK_FAILED", data: { agentId, task, role, error: `AI Task Execution Failed for ${role}: ${event.data.last_error?.message || "Unknown error"}` } });
+
+//                     return { error: `AI Task Execution Failed for ${role}: ${event.data.last_error?.message || "Unknown error"}` };
+
+//                 default:
+//                     console.log(`⚠️ Unknown event type: ${event.event}`);
+//                     break;
+//             }
+//         }
+//     } catch (error) {
+//         console.error(`❌ Task Assignment Error for ${role}:`, error);
+
+//         // Notify clients about the error
+//         broadcast({ type: "TASK_ERROR", data: { agentId, task, role, error: `AI Task Execution Failed for ${role}: ${error.message}` } });
+
+//         return { error: `AI Task Execution Failed for ${role}: ${error.message}` };
+//     }
+// }
 
 
 
