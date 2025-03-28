@@ -37,12 +37,12 @@ app.get("/agents", async (req, res) => {
  */
 app.post("/create-agent", async (req, res) => {
     try {
-        const { role, architectId } = req.body;
-        if (!role || !architectId) {
-            return res.status(400).json({ error: "Role and Architect ID are required." });
+        const { role, agentDescription } = req.body;
+        if (!role || !agentDescription) {
+            return res.status(400).json({ error: "Role or Description are required." });
         }
 
-        const agent = await createAI_Agent(role, architectId);
+        const agent = await createAI_Agent(role,agentDescription );
         res.json({ message: "Agent Created", agent });
     } catch (error) {
         console.error("❌ Error creating AI agent:", error);

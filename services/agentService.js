@@ -52,7 +52,7 @@ export async function listAgents() {
 /**
  * ✅ AI Architect Creates New AI Assistants (e.g., Developers, QA)
  */
-export async function createAI_Agent(role, architectId) {
+export async function createAI_Agent(role, instructions) {
     try {
         // Check if this role already exists
         const existingAgent = defaultAgents.find(agent => agent.role === role);
@@ -63,7 +63,7 @@ export async function createAI_Agent(role, architectId) {
         // If not, create a new AI assistant
         const assistant = await openai.beta.assistants.create({
             name: role,
-            instructions: `You are an AI ${role} created by ${architectId} to assist in project development.`,
+            instructions: instructions,
             tools: [{ type: "code_interpreter" }],
             model: "gpt-4o-mini",
         });
@@ -191,7 +191,7 @@ export async function assignTaskToAgent(agentId, task, role, broadcast) {
         let responseText = "";
 
         // Poll for task completion
-        while (retries < 10) {
+        while (retries < 30) {
             const runStatus = await openai.beta.threads.runs.retrieve(threadId, run.id);
 
             console.log(`⏳ Checking status for ${role}:`, runStatus.status);
